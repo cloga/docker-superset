@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: lochentest.azurecr.io
+        username: ${{ secrets.acr_lochentest_username }}
+        password: ${{ secrets.acr_lochentest_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/" -f  "Dockerfile" -t lochentest.azurecr.io/akslochen:${{ github.sha }}
+        docker push lochentest.azurecr.io/akslochen:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_akslochen_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep akslochen0179 | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace akslochen0179`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: akslochen0179
+        container-registry-url: lochentest.azurecr.io
+        container-registry-username: ${{ secrets.acr_lochentest_username }}
+        container-registry-password: ${{ secrets.acr_lochentest_password }}
+        secret-name: akslochendockerauth
+       
+    - uses: azure/k8s-deploy@v1
+      with:
+        namespace: akslochen0179
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+        images: |
+          lochentest.azurecr.io/akslochen:${{ github.sha }}
+        imagepullsecrets: |
+          akslochendockerauth
